@@ -1,0 +1,1241 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Search, Filter, Plus, Edit, Trash2, Package, Image as ImageIcon, PlusCircle, Tag, X, AlertTriangle } from 'lucide-react';
+import { useLocation } from 'wouter';
+import Layout from '@/components/Layout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ProductService } from '@/lib/db';
+import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import BarcodeScannerButton from '@/components/BarcodeScannerButton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { Product } from '@shared/schema';
+
+const productSchema = z.object({
+  name: z.string().min(1, 'Product name is required'),
+  barcode: z.string().min(1, 'Barcode is required'),
+  price: z.number().min(0.01, 'Price must be greater than 0'),
+  cost: z.number().min(0, 'Cost must be 0 or greater'),
+  quantity: z.number().min(0, 'Quantity must be 0 or greater'),
+  category: z.string().optional(),
+  image: z.string().optional(),
+});
+
+// Schema for stock addition
+const stockAdditionSchema = z.object({
+  addQuantity: z.number().min(1, 'Quantity must be at least 1'),
+});
+
+const categorySchema = z.object({
+  name: z.string().min(1, 'Category name is required'),
+});
+
+// Enhanced product schema with unit selection
+const enhancedProductSchema = productSchema.extend({
+  unit: z.string().default('pcs'),
+});
+
+type ProductFormData = z.infer<typeof enhancedProductSchema>;
+type StockAdditionFormData = z.infer<typeof stockAdditionSchema>;
+type CategoryFormData = z.infer<typeof categorySchema>;
+
+const InventoryManagement: React.FC = () => {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const { isAdmin } = useAuth();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isAddStockDialogOpen, setIsAddStockDialogOpen] = useState(false);
+  const [productLookup, setProductLookup] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [productImage, setProductImage] = useState<string | null>(null);
+  const [isAddingStock, setIsAddingStock] = useState(false);
+  
+  // Category management state
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [deletingCategory, setDeletingCategory] = useState<string | null>(null);
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [isFabExpanded, setIsFabExpanded] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [editModeTimerId, setEditModeTimerId] = useState<number | null>(null);
+  const [pcsPerBox, setPcsPerBox] = useState(1);
+
+  const form = useForm<ProductFormData>({
+    resolver: zodResolver(enhancedProductSchema),
+    defaultValues: {
+      name: '',
+      barcode: '',
+      price: 0,
+      cost: 0,
+      quantity: 0,
+      category: 'general',
+      image: '',
+      unit: 'pcs',
+    },
+  });
+
+  const selectedUnit = form.watch('unit');
+  
+  // Form for adding stock
+  const stockForm = useForm<StockAdditionFormData>({
+    resolver: zodResolver(stockAdditionSchema),
+    defaultValues: {
+      addQuantity: 1,
+    },
+  });
+  
+  // Form for category management
+  const categoryForm = useForm<CategoryFormData>({
+    resolver: zodResolver(categorySchema),
+    defaultValues: {
+      name: '',
+    },
+  });
+
+  // Initial sync to server so customer module can access inventory
+  useEffect(() => {
+    (async () => {
+      try {
+        await ProductService.syncAllProductsToServer();
+      } catch (e) {
+        console.error('Initial product sync failed:', e);
+      }
+    })();
+  }, []);
+
+  // Auto-revert Edit mode if no selection within 30 seconds
+  useEffect(() => {
+    if (!isEditMode) {
+      if (editModeTimerId) {
+        clearTimeout(editModeTimerId);
+        setEditModeTimerId(null);
+      }
+      return;
+    }
+
+    if (selectedProductIds.size === 0) {
+      const id = window.setTimeout(() => {
+        if (selectedProductIds.size === 0) {
+          setIsEditMode(false);
+        }
+      }, 30000);
+      setEditModeTimerId(id);
+    }
+
+    return () => {
+      if (editModeTimerId) {
+        clearTimeout(editModeTimerId);
+        setEditModeTimerId(null);
+      }
+    };
+  }, [isEditMode, selectedProductIds.size]);
+
+  const loadProducts = async () => {
+    try {
+      const allProducts = await ProductService.getAllProducts();
+      setProducts(allProducts);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load products',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Load categories from localStorage
+  const loadCategories = () => {
+    try {
+      const savedCategories = localStorage.getItem('customCategories');
+      if (savedCategories) {
+        setCustomCategories(JSON.parse(savedCategories));
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+    }
+  };
+
+  // Save categories to localStorage
+  const saveCategories = (categories: string[]) => {
+    try {
+      localStorage.setItem('customCategories', JSON.stringify(categories));
+    } catch (error) {
+      console.error('Error saving categories:', error);
+    }
+  };
+
+  // Add new category or update existing one
+  const handleAddCategory = (data: CategoryFormData) => {
+    if (editingCategory) {
+      // Editing mode: update existing category
+      if (data.name !== editingCategory && customCategories.includes(data.name)) {
+        toast({
+          title: 'Error',
+          description: 'Category name already exists',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const newCategories = customCategories.map(c => c === editingCategory ? data.name : c);
+      setCustomCategories(newCategories);
+      saveCategories(newCategories);
+      
+      toast({
+        title: 'Category Updated',
+        description: `Category has been updated to "${data.name}"`,
+      });
+      
+      setEditingCategory(null);
+    } else {
+      // Adding mode: add new category
+      if (customCategories.includes(data.name)) {
+        toast({
+          title: 'Error',
+          description: 'Category already exists',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const newCategories = [...customCategories, data.name];
+      setCustomCategories(newCategories);
+      saveCategories(newCategories);
+      
+      toast({
+        title: 'Category Added',
+        description: `${data.name} has been added to categories`,
+      });
+    }
+    
+    setIsCategoryDialogOpen(false);
+    categoryForm.reset();
+  };
+
+  // Edit category - load existing category name into form
+  const handleEditCategory = (category: string) => {
+    setEditingCategory(category);
+    categoryForm.reset({ name: category });
+    setIsCategoryDialogOpen(true);
+  };
+
+  // Delete category
+  const handleDeleteCategory = (category: string) => {
+    const newCategories = customCategories.filter(c => c !== category);
+    setCustomCategories(newCategories);
+    saveCategories(newCategories);
+    
+    toast({
+      title: 'Category Deleted',
+      description: `${category} has been removed from categories`,
+    });
+    
+    setDeletingCategory(null);
+  };
+
+  useEffect(() => {
+    loadProducts();
+    loadCategories();
+  }, []);
+
+  // Get unique categories for filter chips
+  const allProductCategories = Array.from(new Set(products.map(p => p.category || 'general')));
+  const categories = ['All', ...allProductCategories, ...customCategories.filter(c => !allProductCategories.includes(c))];
+
+  // Filter products based on search and category
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         product.barcode.includes(searchTerm);
+    const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
+    const matchesLowStock = !lowStockOnly || (product.quantity <= 10);
+    return matchesSearch && matchesCategory && matchesLowStock;
+  });
+
+  const lowStockCount = products.filter(p => p.quantity <= 10).length;
+
+  const toggleSelectProduct = (id: string) => {
+    setSelectedProductIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedProductIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      for (const id of selectedProductIds) {
+        await ProductService.deleteProduct(id);
+      }
+      setSelectedProductIds(new Set());
+      setIsEditMode(false);
+      await loadProducts();
+      toast({ title: 'Deleted', description: 'Selected products were deleted.' });
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      toast({ title: 'Error', description: 'Failed to delete selected products', variant: 'destructive' });
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteConfirmOpen(false);
+    }
+  };
+
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const imageData = e.target?.result as string;
+        setProductImage(imageData);
+        form.setValue('image', imageData);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const onSubmit = async (data: ProductFormData) => {
+    setIsLoading(true);
+    try {
+      if (editingProduct) {
+        // Preserve the original quantity when updating
+        const updatedData = {
+          ...data,
+          quantity: editingProduct.quantity
+        };
+        await ProductService.updateProduct(editingProduct.id, updatedData);
+        toast({
+          title: 'Product Updated',
+          description: `${data.name} has been updated`,
+        });
+      } else {
+        let finalQuantity = data.quantity ?? 0;
+        
+        // Handle unit conversion
+        if (data.unit === 'dozen') {
+          finalQuantity = finalQuantity * 12;
+        } else if (data.unit === 'box') {
+          finalQuantity = finalQuantity * pcsPerBox;
+        }
+
+        const registerData = { ...data, quantity: finalQuantity };
+        await ProductService.addProduct(registerData);
+        toast({
+          title: 'Product Registered',
+          description: `${data.name} has been registered in the system (Total: ${finalQuantity} pcs)`,
+        });
+      }
+      
+      await loadProducts();
+      // Sync local inventory to server for customer module
+      await ProductService.syncAllProductsToServer();
+      setIsAddDialogOpen(false);
+      setEditingProduct(null);
+      setProductImage(null);
+      form.reset();
+    } catch (error) {
+      console.error('Error saving product:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save product',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Handle stock addition
+  const handleAddStock = async (data: StockAdditionFormData) => {
+    if (!editingProduct) return;
+
+    setIsAddingStock(true);
+    try {
+      // Account for units in stock addition
+      let quantityToAdd = data.addQuantity;
+      const currentUnit = form.getValues('unit');
+
+      if (currentUnit === 'dozen') {
+        quantityToAdd *= 12;
+      } else if (currentUnit === 'box') {
+        quantityToAdd *= pcsPerBox;
+      }
+
+      const updatedQuantity = editingProduct.quantity + quantityToAdd;
+      await ProductService.updateProduct(editingProduct.id, {
+        ...editingProduct,
+        quantity: updatedQuantity
+      });
+
+      // Update the editing product with new quantity
+      setEditingProduct({
+        ...editingProduct,
+        quantity: updatedQuantity
+      });
+
+      toast({
+        title: 'Stock Updated',
+        description: `Added ${quantityToAdd} pieces to ${editingProduct.name}`,
+      });
+
+      stockForm.reset();
+      await loadProducts();
+      // Sync after stock changes
+      await ProductService.syncAllProductsToServer();
+    } catch (error) {
+      console.error('Error adding stock:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to update stock',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAddingStock(false);
+    }
+  };
+
+  const handleEdit = (product: Product) => {
+    setEditingProduct(product);
+    setProductImage(product.image || null);
+    form.reset({
+      name: product.name,
+      barcode: product.barcode,
+      price: product.price,
+      cost: (product as any).cost ?? 0,
+      quantity: product.quantity,
+      category: product.category || undefined,
+      image: product.image || undefined,
+    });
+    setIsAddDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingProduct) return;
+
+    try {
+      await ProductService.deleteProduct(deletingProduct.id);
+      toast({
+        title: 'Product Deleted',
+        description: `${deletingProduct.name} has been removed from inventory`,
+      });
+      await loadProducts();
+      // Sync after deletion
+      await ProductService.syncAllProductsToServer();
+      setDeletingProduct(null);
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete product',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const getStockStatus = (quantity: number) => {
+    if (quantity === 0) return { label: 'out of stock', color: 'text-red-500' };
+    if (quantity <= 5) return { label: 'low stock', color: 'text-orange-500' };
+    return { label: 'in stock', color: 'text-green-500' };
+  };
+
+  return (
+    <Layout>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="min-h-screen bg-gray-50 dark:bg-gray-900"
+      >
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-800 shadow-lg border-b dark:border-gray-700">
+          <div className="flex items-center justify-between p-4">
+            <button
+              onClick={() => setLocation('/admin-main')}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5 dark:text-gray-300" />
+            </button>
+            <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Inventory Management</h1>
+            <div className="w-10" />
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4 pb-20">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              type="text"
+              placeholder="Search products..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 bg-white dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600"
+            />
+          </div>
+
+          {/* Toolbar: Dropdown (left) + Low Stock (right of dropdown) + Edit (far right) */}
+          <div className="flex items-center gap-2 sm:gap-3 flex-nowrap w-full">
+            {/* Left: Category Dropdown + Low Stock Indicator */}
+            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+              {/* Category Dropdown */}
+              <div aria-label="Filter by category" className="w-[140px] sm:w-[160px]">
+                <Select onValueChange={setSelectedCategory} defaultValue={selectedCategory}>
+                  <SelectTrigger className="h-9 text-sm border-gray-300 dark:border-gray-600 focus:border-[#FF8882]" aria-label="Category">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Low Stock Indicator/Filter */}
+              <Button
+                aria-label="Toggle low stock filter"
+                variant={lowStockOnly ? 'default' : 'outline'}
+                className={`${lowStockOnly ? 'bg-red-500 hover:bg-red-600 text-white' : ''} whitespace-nowrap text-xs sm:text-sm px-2 sm:px-3 flex-shrink-0`}
+                onClick={() => setLowStockOnly((v) => !v)}
+              >
+                Low Stock
+                <span
+                  className={`ml-2 inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] sm:text-xs ${lowStockOnly ? 'bg-white text-red-600' : 'bg-red-100 text-red-600'}`}
+                  aria-label={`Total low stock items: ${lowStockCount}`}
+                >
+                  {lowStockCount}
+                </span>
+              </Button>
+            </div>
+
+            {/* Far Right: Edit/Delete Toggle Button */}
+            <Button
+              aria-label={selectedProductIds.size > 0 ? 'Delete selected products' : (isEditMode ? 'Cancel edit mode' : 'Enter edit mode')}
+              className="ml-auto bg-pink-500 hover:bg-pink-600 text-white transition-all duration-200 flex-shrink-0 px-3 text-xs sm:text-sm"
+              onClick={() => {
+                if (selectedProductIds.size > 0) {
+                  setBulkDeleteConfirmOpen(true);
+                } else {
+                  setIsEditMode(prev => !prev);
+                  if (!isEditMode) setSelectedProductIds(new Set());
+                }
+              }}
+            >
+              {selectedProductIds.size > 0 ? (
+                <span className="inline-flex items-center"><Trash2 className="w-4 h-4 mr-2" /> Delete</span>
+              ) : (
+                <span className="inline-flex items-center"><Edit className="w-4 h-4 mr-2" /> Edit</span>
+              )}
+            </Button>
+          </div>
+
+          {/* Products Grid */}
+          <div className="space-y-3">
+            {filteredProducts.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <Package className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
+                <p>No products found</p>
+                <p className="text-sm">Add your first product to get started</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredProducts.map((product, index) => {
+                  const stockStatus = getStockStatus(product.quantity);
+                  return (
+                    <motion.div
+                      key={product.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className={`bg-white dark:bg-gray-800 p-4 rounded-xl shadow-lg flex items-center space-x-4 ${isEditMode && selectedProductIds.has(product.id) ? 'ring-2 ring-pink-400' : ''} cursor-pointer hover:shadow-xl`}
+                      onClick={() => setLocation(`/inventory/product/${product.id}`)}
+                    >
+                      {isEditMode && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${product.name}`}
+                          checked={selectedProductIds.has(product.id)}
+                          onChange={() => toggleSelectProduct(product.id)}
+                          className="h-5 w-5 accent-pink-500"
+                        />
+                      )}
+                      {/* Product Image */}
+                      <div className="flex-shrink-0">
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="w-16 h-16 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                            <ImageIcon className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Product Details */}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-800 dark:text-gray-200 truncate">{product.name}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Barcode: {product.barcode}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Category: {product.category || 'general'}</p>
+                        <p className="text-[#FF8882] font-medium">₱{product.price.toFixed(2)}</p>
+                        {product.quantity <= 10 && (
+                          <p className="text-xs text-red-500 inline-flex items-center"><AlertTriangle className="w-3 h-3 mr-1" />Low stock</p>
+                        )}
+                      </div>
+
+                      {/* Stock and Actions */}
+                      <div className="text-right">
+                        <div className={`text-lg font-bold ${stockStatus.color}`}>
+                          {product.quantity}
+                        </div>
+                        <div className={`text-xs ${stockStatus.color}`}>
+                          {stockStatus.label}
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleEdit(product); }}
+                            className="text-primary-500 dark:text-primary-400 p-1 touch-feedback"
+                            aria-label={`Edit ${product.name}`}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setDeletingProduct(product); }}
+                              className="text-red-500 dark:text-red-400 p-1 touch-feedback"
+                              title="Delete product (Admin only)"
+                              aria-label={`Delete ${product.name}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Bulk Delete Confirmation */}
+        <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete selected products?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. You are about to delete {selectedProductIds.size} product(s).
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel aria-label="Cancel bulk delete">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleBulkDelete} disabled={isBulkDeleting} aria-label="Confirm bulk delete">
+                {isBulkDeleting ? 'Deleting...' : 'Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Floating Action Button - Only visible to admins */}
+        {isAdmin && (
+          <div className="fixed bottom-28 right-6 z-50 flex flex-col items-end space-y-3">
+            {/* FAB Menu - Only shown when expanded */}
+            {isFabExpanded && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-2 mb-2"
+                >
+                  <button
+                    onClick={() => {
+                      setEditingProduct(null);
+                      setProductImage(null);
+                      form.reset({
+                        name: '',
+                        barcode: '',
+                        price: 0,
+                        quantity: 0,
+                        category: undefined,
+                        image: undefined,
+                      });
+                      setIsAddDialogOpen(true);
+                      setIsFabExpanded(false);
+                    }}
+                    className="flex items-center space-x-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg w-full text-left"
+                  >
+                    <PlusCircle className="w-5 h-5 text-pink-600" />
+                    <span className="text-gray-700 dark:text-gray-200">Add Product</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setEditingCategory(null);
+                      categoryForm.reset();
+                      setIsCategoryDialogOpen(true);
+                      setIsFabExpanded(false);
+                    }}
+                    className="flex items-center space-x-2 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg w-full text-left"
+                  >
+                    <Tag className="w-5 h-5 text-pink-500" />
+                    <span className="text-gray-700 dark:text-gray-200">Create Category</span>
+                  </button>
+                </motion.div>
+              </>
+            )}
+            
+            {/* Main FAB Button */}
+            <motion.button
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              onClick={() => setIsFabExpanded(!isFabExpanded)}
+              className="w-14 h-14 bg-[#FF8882] text-white rounded-full shadow-lg hover:bg-[#D89D9D] transition-colors flex items-center justify-center"
+              style={{
+                boxShadow: '0 4px 12px rgba(255, 136, 130, 0.3)',
+              }}
+            >
+              {isFabExpanded ? <X className="w-6 h-6" /> : <Plus className="w-6 h-6" />}
+            </motion.button>
+          </div>
+        )}
+
+        {/* Add/Edit Product Dialog */}
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogContent className="w-[95vw] sm:w-auto sm:max-w-lg md:max-w-xl lg:max-w-2xl max-h-[85vh] overflow-y-auto p-4 dark:bg-gray-800 dark:text-gray-200">
+            <DialogHeader>
+              <DialogTitle className="dark:text-gray-200">
+                {editingProduct ? 'Edit Product' : 'Add New product'}
+              </DialogTitle>
+            </DialogHeader>
+            
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1 sm:p-0">
+                {/* Product Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Product Image</label>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0">
+                    <div className="relative">
+                      {productImage ? (
+                        <img
+                          src={productImage}
+                          alt="Product"
+                          className="w-20 h-20 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600">
+                          <ImageIcon className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                        </div>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Click to upload product image
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem className="relative">
+                      <FormLabel className="text-gray-700 dark:text-gray-300">Product Name</FormLabel>
+                      <FormControl>
+                        <Input 
+                          {...field} 
+                          className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882] pl-3 pt-2"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem className="relative">
+                      <FormLabel className="text-gray-700 dark:text-gray-300">Category</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="general">General</SelectItem>
+                          {customCategories.map((category) => (
+                            <SelectItem key={category} value={category}>{category}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {/* Current Stock Display - Read-only with enhanced styling */}
+                {editingProduct && (
+                  <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div className="text-center">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Current Stock</p>
+                      <div className="text-3xl font-bold text-green-600 dark:text-green-400">
+                        {editingProduct.quantity}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="price"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-700 dark:text-gray-300">Price (₱)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            {...field}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                            className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="cost"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-700 dark:text-gray-300">Cost (₱)</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            {...field}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                            className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  {!editingProduct && (
+                    <FormField
+                      control={form.control}
+                      name="quantity"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-gray-700 dark:text-gray-300">Quantity</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min="0"
+                              {...field}
+                              onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                              className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                  {editingProduct && (
+                    <input type="hidden" name="quantity" value={editingProduct?.quantity || 0} />
+                  )}
+                  
+                  <FormField
+                    control={form.control}
+                    name="unit"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-gray-700 dark:text-gray-300">Unit</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]">
+                              <SelectValue placeholder="Select unit" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="pcs">pcs</SelectItem>
+                            <SelectItem value="dozen">dozen</SelectItem>
+                            <SelectItem value="box">box</SelectItem>
+                            <SelectItem value="kg">kg</SelectItem>
+                            <SelectItem value="liter">liter</SelectItem>
+                            <SelectItem value="pack">pack</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {selectedUnit === 'dozen' && !editingProduct && (
+                          <p className="text-xs text-gray-500 mt-1">
+                             Total: {(form.watch('quantity') || 0) * 12} pcs
+                          </p>
+                        )}
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {selectedUnit === 'box' && !editingProduct && (
+                    <FormItem>
+                      <FormLabel className="text-gray-700 dark:text-gray-300">Pcs per Box</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={pcsPerBox}
+                          onChange={(e) => setPcsPerBox(parseInt(e.target.value) || 0)}
+                          className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                        />
+                      </FormControl>
+                      <p className="text-xs text-gray-500">
+                         Total: {(form.watch('quantity') || 0) * pcsPerBox} pcs
+                      </p>
+                    </FormItem>
+                  )}
+                  
+                  {/* Add to Stock Input - Only shown when editing */}
+                  {editingProduct && (
+                    <FormItem>
+                      <FormLabel className="text-gray-700 dark:text-gray-300">Add to Stock</FormLabel>
+                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-2">
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Enter quantity"
+                          value={stockForm.watch('addQuantity')}
+                          onChange={(e) => stockForm.setValue('addQuantity', parseInt(e.target.value) || 0)}
+                          className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                        />
+                        <Button 
+                          type="button"
+                          onClick={stockForm.handleSubmit(handleAddStock)}
+                          disabled={isAddingStock}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          <PlusCircle className="w-4 h-4 mr-1" />
+                          Add
+                        </Button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Enter the quantity to add to current stock</p>
+                      {stockForm.formState.errors.addQuantity && (
+                        <p className="text-xs text-red-500 mt-1">{stockForm.formState.errors.addQuantity.message}</p>
+                      )}
+                    </FormItem>
+                  )}
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="barcode"
+                  render={({ field }) => (
+                    <FormItem className="relative">
+                      <FormLabel className="text-gray-700 dark:text-gray-300">Barcode</FormLabel>
+                      <FormControl>
+                        <div className="flex space-x-2">
+                          <Input 
+                            {...field} 
+                            className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882] pl-3 pt-2"
+                          />
+                          <BarcodeScannerButton
+                            onBarcodeScanned={(barcode: string) => field.onChange(barcode)}
+                            className="px-3"
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => setLocation(editingProduct ? `/inventory/product/${editingProduct.id}/variant/add` : '/inventory/variant/add')}
+                          className="px-3 py-2 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-sm"
+                        >
+                          Add Variant
+                        </button>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+                
+
+
+                <div className="flex space-x-2 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddDialogOpen(false)}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isLoading}
+                    className="flex-1 bg-[#FF8882] hover:bg-[#D89D9D]"
+                  >
+                    {isLoading ? 'Saving...' : (editingProduct ? 'Update' : 'Add Product')}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add to Inventory Dialog */}
+        <Dialog open={isAddStockDialogOpen} onOpenChange={setIsAddStockDialogOpen}>
+          <DialogContent className="sm:max-w-md dark:bg-gray-800 dark:text-gray-200">
+            <DialogHeader>
+              <DialogTitle>Add to Inventory</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search by Product ID or Name"
+                  value={productLookup}
+                  onChange={(e) => setProductLookup(e.target.value)}
+                  className="pl-10 bg-white dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600"
+                />
+              </div>
+              <div className="max-h-48 overflow-y-auto border rounded-md dark:border-gray-700">
+                {products
+                  .filter(p => p.id.toLowerCase().includes(productLookup.toLowerCase()) || p.name.toLowerCase().includes(productLookup.toLowerCase()))
+                  .map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => setSelectedProductId(p.id)}
+                      className={`w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${selectedProductId === p.id ? 'bg-gray-50 dark:bg-gray-700' : ''}`}
+                    >
+                      <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">{p.name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">ID: {p.id} • Barcode: {p.barcode}</div>
+                    </button>
+                  ))}
+                {products.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500 dark:text-gray-400">No registered products found.</div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder="Quantity to add"
+                  value={stockForm.watch('addQuantity')}
+                  onChange={(e) => stockForm.setValue('addQuantity', parseInt(e.target.value) || 0)}
+                  className="border-gray-300 dark:border-gray-600 focus:border-[#FF8882]"
+                />
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    if (!selectedProductId) {
+                      toast({ title: 'Select a product', description: 'Choose a registered product first', variant: 'destructive' });
+                      return;
+                    }
+                    try {
+                      await ProductService.updateStock(selectedProductId, stockForm.getValues('addQuantity'));
+                      await loadProducts();
+                      await ProductService.syncAllProductsToServer();
+                      toast({ title: 'Inventory Updated', description: 'Stock added successfully' });
+                      setIsAddStockDialogOpen(false);
+                      setSelectedProductId(null);
+                      stockForm.reset({ addQuantity: 1 });
+                    } catch (error) {
+                      toast({ title: 'Error', description: 'Failed to add stock', variant: 'destructive' });
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  Add
+                </Button>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddStockDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={!!deletingProduct} onOpenChange={() => setDeletingProduct(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Product</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{deletingProduct?.name}"? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                className="bg-red-500 hover:bg-red-600"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Category Delete Confirmation */}
+        <AlertDialog open={!!deletingCategory} onOpenChange={(open) => !open && setDeletingCategory(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Category</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete the category "{deletingCategory}"? This won't affect products already using this category.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => deletingCategory && handleDeleteCategory(deletingCategory)}>
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Category Creation Dialog */}
+        <Dialog 
+          open={isCategoryDialogOpen} 
+          onOpenChange={(open) => {
+            setIsCategoryDialogOpen(open);
+            if (!open) {
+              setEditingCategory(null);
+              categoryForm.reset();
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingCategory ? 'Edit Category' : 'Create New Category'}</DialogTitle>
+            </DialogHeader>
+            <Form {...categoryForm}>
+              <form onSubmit={categoryForm.handleSubmit(handleAddCategory)} className="space-y-4">
+                <FormField
+                  control={categoryForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Category Name</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="Enter category name" 
+                          {...field} 
+                          className="bg-white dark:bg-gray-800"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                {/* List of existing categories */}
+                {customCategories.length > 0 && (
+                  <div className="mt-4 border rounded-md overflow-hidden flex flex-col max-h-[30vh]">
+                    <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2 text-sm font-medium flex-none sticky top-0 z-10">
+                      Existing Categories
+                    </div>
+                    <div className="divide-y divide-gray-200 dark:divide-gray-700 overflow-y-auto">
+                      {customCategories.map((category, index) => (
+                        <div key={index} className="px-4 py-3 flex justify-between items-center">
+                          <div className="text-sm">
+                            <span className="text-gray-500 dark:text-gray-400">Category Created: </span>
+                            <span className="font-medium text-gray-900 dark:text-gray-100">{category}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditCategory(category)}
+                              className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeletingCategory(category)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex justify-end space-x-2 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsCategoryDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    type="submit"
+                    className="bg-pink-500 hover:bg-pink-600 text-white"
+                    disabled={isLoading}
+                  >
+                    {editingCategory ? 'Update' : 'Create'}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      </motion.div>
+    </Layout>
+  );
+};
+
+export default InventoryManagement;

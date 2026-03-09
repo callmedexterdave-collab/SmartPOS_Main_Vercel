@@ -1,0 +1,136 @@
+import React from 'react';
+import { useLocation } from 'wouter';
+import { motion } from 'framer-motion';
+import { Users, ShieldCheck, UserCircle2, ArrowRight } from 'lucide-react';
+
+const RoleSelection: React.FC = () => {
+  const [, setLocation] = useLocation();
+
+  return (
+    <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Background elements */}
+      <div className="absolute top-0 left-0 w-full h-full">
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#BF953F]/5 rounded-full blur-[120px]"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#BF953F]/5 rounded-full blur-[120px]"></div>
+      </div>
+
+      <div className="w-full max-w-4xl relative z-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="text-center mb-16"
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-gray-100 shadow-sm mb-8"
+          >
+            <div className="w-2 h-2 rounded-full bg-[#BF953F] animate-pulse"></div>
+            <span className="text-gray-400 text-[10px] font-black tracking-[0.2em] uppercase">Select Access Mode</span>
+          </motion.div>
+
+          <h1 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter leading-none">
+            <span className="text-gray-900">
+              Welcome to
+            </span>
+            <br />
+            <span className="gold-gradient-text uppercase">
+              SmartPOS+
+            </span>
+          </h1>
+          <p className="text-gray-400 text-lg font-medium max-w-md mx-auto">
+            Experience the next generation of enterprise management.
+          </p>
+        </motion.div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <motion.button
+            initial={{ x: -20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            onClick={() => setLocation('/admin-login')}
+            data-testid="button-select-admin"
+            className="group relative flex flex-col items-start p-10 rounded-[2.5rem] bg-white border border-gray-100 hover:border-[#BF953F]/30 shadow-[0_10px_40px_rgba(0,0,0,0.02)] hover:shadow-[0_20px_50px_rgba(191,149,63,0.08)] transition-all duration-500 overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-opacity">
+              <ArrowRight className="w-6 h-6 text-[#BF953F]" />
+            </div>
+
+            <div className="w-16 h-16 rounded-3xl bg-amber-50 flex items-center justify-center mb-8 group-hover:bg-[#BF953F] transition-colors duration-500">
+              <ShieldCheck className="w-8 h-8 text-[#BF953F] group-hover:text-white" />
+            </div>
+
+            <h3 className="text-2xl font-black mb-2 text-gray-900 group-hover:text-[#BF953F] transition-colors">
+              Administrator
+            </h3>
+            <p className="text-gray-400 text-sm font-medium leading-relaxed text-left group-hover:text-gray-500 transition-colors">
+              Full system control, strategic oversight, and advanced analytics.
+            </p>
+
+            <div className="mt-10 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-[#BF953F]/60">
+              <span>Secure Access</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#BF953F]/30"></div>
+              <span>Command Center</span>
+            </div>
+          </motion.button>
+
+          <motion.button
+            initial={{ x: 20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            onClick={() => setLocation('/staff-login')}
+            data-testid="button-select-staff"
+            className="group relative flex flex-col items-start p-10 rounded-[2.5rem] bg-white border border-gray-100 hover:border-[#BF953F]/30 shadow-[0_10px_40px_rgba(0,0,0,0.02)] hover:shadow-[0_20px_50px_rgba(191,149,63,0.08)] transition-all duration-500 overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-6 opacity-0 group-hover:opacity-100 transition-opacity">
+              <ArrowRight className="w-6 h-6 text-[#BF953F]" />
+            </div>
+
+            <div className="w-16 h-16 rounded-3xl bg-blue-50 flex items-center justify-center mb-8 group-hover:bg-[#BF953F] transition-colors duration-500">
+              <UserCircle2 className="w-8 h-8 text-[#BF953F] group-hover:text-white" />
+            </div>
+
+            <h3 className="text-2xl font-black mb-2 text-gray-900 group-hover:text-[#BF953F] transition-colors">
+              Staff Member
+            </h3>
+            <p className="text-gray-400 text-sm font-medium leading-relaxed text-left group-hover:text-gray-500 transition-colors">
+              Operational efficiency, customer service, and transaction processing.
+            </p>
+
+            <div className="mt-10 flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-[#BF953F]/60">
+              <span>Rapid Entry</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#BF953F]/30"></div>
+              <span>Terminal Mode</span>
+            </div>
+          </motion.button>
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1 }}
+          className="mt-20 text-center space-y-2"
+        >
+          <p className="text-[#BF953F] text-[11px] font-black tracking-[0.3em] uppercase">
+            @2026 SMARTPOS+
+          </p>
+          <div className="space-y-1">
+            <p className="text-gray-500 text-[10px] font-bold tracking-wider uppercase">
+              Redesigned and Developed By: <span className="text-gray-900">Dexter Dave A. Ros</span>
+            </p>
+            <p className="text-gray-400 text-[9px] font-medium italic">
+              ( Bachelor of Science In Information System )
+            </p>
+          </div>
+          <p className="text-gray-300 text-[8px] font-medium tracking-widest uppercase mt-4 opacity-80">
+            "This System is Protected Under Copyright law"
+          </p>
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+export default RoleSelection;
