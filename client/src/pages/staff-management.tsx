@@ -121,8 +121,9 @@ const StaffManagement: React.FC = () => {
 
     const init = async () => {
       try {
-        // First try connecting to the current origin (most reliable for both deployed and local)
-        socketInstance = io({
+        // First try connecting to the current origin or configured backend URL
+        const socketUrl = (import.meta as any).env?.VITE_BACKEND_URL || window.location.origin;
+        socketInstance = io(socketUrl, {
           auth: {
             token: localStorage.getItem('userToken') || '',
             businessId: user?.id || ''
@@ -134,7 +135,7 @@ const StaffManagement: React.FC = () => {
           timeout: 20000
         });
         
-        setServerInfoState(window.location.origin);
+        setServerInfoState(socketUrl);
       } catch (error) {
         console.error('Socket init failed:', error);
         socketInstance = null;

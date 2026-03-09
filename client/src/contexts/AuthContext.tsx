@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (cancelled) return;
 
         // If data.origin says localhost but we're on a public URL, it's a proxy mismatch
-        let socketUrl = data.origin;
+        let socketUrl = (import.meta as any).env?.VITE_BACKEND_URL || data.origin;
         if (typeof window !== 'undefined' && socketUrl.includes('localhost') && !window.location.hostname.includes('localhost')) {
           socketUrl = window.location.origin;
         }
@@ -66,7 +66,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       } catch (error) {
         // Fallback to origin (best-effort) if server-info not available
         try {
-          const newSocket = io(window.location.origin, { reconnection: true });
+          const socketUrl = (import.meta as any).env?.VITE_BACKEND_URL || window.location.origin;
+          const newSocket = io(socketUrl, { reconnection: true });
           if (!cancelled) setSocket(newSocket);
         } catch (e) {
           console.warn('Socket init failed:', e);

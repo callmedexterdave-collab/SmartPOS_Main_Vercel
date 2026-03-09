@@ -84,8 +84,9 @@ const CustomerScan: React.FC = () => {
   
   // Connect to socket for real-time inventory updates
   useEffect(() => {
-    // Connect to socket.io server
-    socketRef.current = io();
+    // Connect to socket.io server using the configured backend URL or current origin
+    const socketUrl = (import.meta as any).env?.VITE_BACKEND_URL || window.location.origin;
+    socketRef.current = io(socketUrl);
     
     // Listen for inventory updates
     socketRef.current.on('inventory-update', () => {

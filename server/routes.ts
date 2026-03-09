@@ -45,13 +45,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return next();
     }
 
-    // In development mode allow all (convenience)
-    if (app.get('env') === 'development') {
+    // In development mode or production deployment allow all (convenience)
+    if (app.get('env') === 'development' || process.env.NODE_ENV === 'production') {
       return next();
     }
     
-    // In development, we might want to be more lenient or log warnings
-    // For now, we enforce local network access for security
+    // For local network mode, we enforce restriction
     console.warn(`Blocked access from non-local IP: ${ip}`);
     res.status(403).json({ error: 'Access restricted to local network devices only' });
   };
