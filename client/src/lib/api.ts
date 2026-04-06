@@ -21,33 +21,44 @@ const getHeaders = () => {
 
 const api = {
   async get(endpoint: string) {
-    const response = await fetch(`${getBaseUrl()}${endpoint}`, {
-      headers: getHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    try {
+      const response = await fetch(`${getBaseUrl()}${endpoint}`, {
+        headers: getHeaders(),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API GET Error (${response.status}): ${errorText || response.statusText}`);
+      }
+      return response.json();
+    } catch (error) {
+      console.error(`API GET failed for ${endpoint}:`, error);
+      throw error;
     }
-    return response.json();
   },
 
   async post(endpoint: string, body: any) {
-    const response = await fetch(`${getBaseUrl()}${endpoint}`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      try {
-        // Try to parse the error as JSON
-        const errorJson = JSON.parse(errorText);
-        throw new Error(errorJson.message || 'An unknown error occurred');
-      } catch (e) {
-        // If it's not JSON, throw the raw text
-        throw new Error(errorText || 'An unknown error occurred');
+    try {
+      const response = await fetch(`${getBaseUrl()}${endpoint}`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        try {
+          // Try to parse the error as JSON
+          const errorJson = JSON.parse(errorText);
+          throw new Error(errorJson.message || `API POST Error (${response.status})`);
+        } catch (e) {
+          // If it's not JSON, throw the raw text or status
+          throw new Error(errorText || `API POST Error (${response.status})`);
+        }
       }
+      return response.json();
+    } catch (error) {
+      console.error(`API POST failed for ${endpoint}:`, error);
+      throw error;
     }
-    return response.json();
   },
 
   async put(endpoint: string, body: any) {

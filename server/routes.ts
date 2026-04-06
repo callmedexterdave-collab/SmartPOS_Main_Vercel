@@ -19,9 +19,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Enable CORS for all routes
   app.use(cors({
-    origin: ["https://smartposversion2.netlify.app", "http://localhost:5000", "http://localhost:3000"],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+      // Allow all netlify subdomains and localhost
+      if (origin.includes('netlify.app') || origin.includes('localhost') || origin.includes('onrender.com')) {
+        return callback(null, true);
+      }
+      return callback(null, true); // For now, allow everything for testing
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
   }));
   app.use(express.json());
 
@@ -977,11 +986,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Socket.IO Setup
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: ["https://smartposversion2.netlify.app", "http://localhost:5000", "http://localhost:3000"],
+      origin: true, // Allow all origins for testing
       methods: ["GET", "POST"],
       credentials: true
     },
     transports: ["polling", "websocket"],
+    allowEIO3: true, // Support for older clients
     pingTimeout: 60000,
     pingInterval: 25000
   });
