@@ -263,6 +263,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/sales', async (req: Request, res: Response) => {
+    try {
+      const sale = req.body;
+      const items = Array.isArray(sale.items) ? sale.items : [];
+      
+      // Update inventory on server
+      for (const item of items) {
+        try {
+          const product = dbService.getProductById(item.productId);
+          if (product) {
+            dbService.updateStock(item.productId, -Number(item.quantity));
+          } else {
+            const variant = dbService.getVariantById(item.productId);
+            if (variant) {
+              const newQty = (variant.quantity || 0) - Number(item.quantity);
+              dbService.saveVariants([{ ...variant, quantity: newQty }]);
+            }
+          }
+        } catch (e) {
+          console.warn(`Failed to update server stock for item ${item.productId}`, e);
+        }
+      }
+      
+      // Notify all connected clients about inventory change
+      io.emit('inventory-update', { timestamp: new Date().toISOString() });
+      
+      res.status(201).json({ success: true });
+    } catch (error) {
+      console.error('Error processing server sale:', error);
+      res.status(500).json({ error: 'Failed to process sale on server' });
+    }
+  });
+
   app.get('/api/cloud/products', async (_req: Request, res: Response) => {
     try {
       const supabase = getSupabase();

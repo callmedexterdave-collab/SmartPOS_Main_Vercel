@@ -965,40 +965,31 @@ const ProfileSettings: React.FC = () => {
                 <ExternalScannerSettingsCard />
               </div>
               <div className="mt-4">
-                <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200">Developers</h3>
-                <div className="mt-2 bg-white p-6 rounded-2xl shadow-lg border border-gray-200">
-                  <div className="flex items-center min-h-[160px]">
-                    <div className="flex-1 pr-6">
-                      <AnimatePresence mode="wait">
-                        <motion.div
-                          key={devSlideIndex}
-                          initial={{ opacity: 0, y: 40 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -40 }}
-                          transition={{ duration: 0.4 }}
-                        >
-                          <p className="text-xl font-semibold text-gray-800">{devSlides[devSlideIndex].name}</p>
-                          <p className="text-sm text-gray-500">{devSlides[devSlideIndex].role}</p>
-                        </motion.div>
-                      </AnimatePresence>
+                <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200">Developer</h3>
+                <Card className="p-6 bg-white shadow-lg border border-gray-100 mt-2 rounded-2xl overflow-hidden relative">
+                  <div className="flex flex-col md:flex-row items-center gap-6">
+                    <div className="w-32 h-32 rounded-2xl overflow-hidden border-4 border-[#FF8882]/20 shadow-md flex-none bg-gray-100">
+                       <img 
+                         src="https://raw.githubusercontent.com/callmedexterdave-collab/SmartPOS_Main_Vercel/main/client/public/developer.jpg" 
+                         alt="Dexter Dave A. Ros" 
+                         className="w-full h-full object-cover"
+                         onError={(e) => {
+                           (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Dexter+Dave+Ros&background=FF8882&color=fff&size=128';
+                         }}
+                       />
                     </div>
-                    <div className="w-32 h-32 md:w-40 md:h-40 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 flex items-center justify-center">
-                      {devSlides[devSlideIndex].imageUrl ? (
-                        <img src={devSlides[devSlideIndex].imageUrl} alt={devSlides[devSlideIndex].name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full bg-gray-200" />
-                      )}
+                    <div className="flex-1 text-center md:text-left">
+                       <h3 className="text-xl font-bold text-gray-900">Dexter Dave A. Ros</h3>
+                       <p className="text-[#FF8882] font-medium mb-4">Developer and Designer</p>
+                       <Button 
+                         className="bg-[#FF8882] hover:bg-[#D89D9D] text-white px-8 rounded-xl shadow-lg transition-all active:scale-95"
+                         onClick={() => window.open('mailto:dexterdave.ros@example.com')}
+                       >
+                         Contact me
+                       </Button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-center gap-2 mt-4">
-                    {devSlides.map((_, i) => (
-                      <span
-                        key={i}
-                        className={`inline-block w-2 h-2 rounded-full ${i === devSlideIndex ? 'bg-[#FF8882]' : 'bg-gray-300'}`}
-                      />
-                    ))}
-                  </div>
-                </div>
+                </Card>
               </div>
             </div>
           </div>

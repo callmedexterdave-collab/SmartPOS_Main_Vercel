@@ -631,6 +631,24 @@ export class SalesService {
           }
         }
       }
+      
+      // CRITICAL: Push sale to server for admin visibility
+      try {
+        const saleWithItems = {
+          ...sale,
+          items: saleData.items.map(item => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            unit: item.unit,
+            name: item.name
+          }))
+        };
+        await api.post('/api/sales', saleWithItems);
+        console.log('Sale pushed to server successfully');
+      } catch (err) {
+        console.warn('Failed to push sale to server immediately, will sync later:', err);
+      }
     } catch (error) {
       // If stock update fails, remove the sale record to maintain consistency
       await db.sales.delete(sale.id);

@@ -83,7 +83,7 @@ const ScannerSales: React.FC = () => {
   // Pop-up state for quantity input
   const [showQuantityDialog, setShowQuantityDialog] = useState(false);
   const [scannedProduct, setScannedProduct] = useState<any>(null);
-  const [tempQuantity, setTempQuantity] = useState(1);
+  const [tempQuantity, setTempQuantity] = useState<number | ''>(1);
   const [tempUnit, setTempUnit] = useState<'pieces' | 'dozen' | 'carton'>('pieces');
 
   // Pay Modal State
@@ -301,8 +301,10 @@ const ScannerSales: React.FC = () => {
   const handleConfirmQuantity = () => {
     if (!scannedProduct) return;
 
+    const currentTempQuantity = tempQuantity === '' ? 1 : tempQuantity;
+
     // Validate quantity
-    if (tempQuantity < 1) {
+    if (currentTempQuantity < 1) {
       toast({
         title: 'Invalid Quantity',
         description: 'Quantity must be at least 1',
@@ -313,7 +315,7 @@ const ScannerSales: React.FC = () => {
 
     // Convert quantity based on unit
     const unitMultiplier = getUnitMultiplier(tempUnit);
-    const actualQuantity = tempQuantity * unitMultiplier;
+    const actualQuantity = currentTempQuantity * unitMultiplier;
 
     // Check stock availability
     if (scannedProduct.quantity < actualQuantity) {
@@ -343,7 +345,7 @@ const ScannerSales: React.FC = () => {
       productId: scannedProduct.id,
       name: scannedProduct.name,
       price: scannedProduct.price,
-      quantity: tempQuantity,
+      quantity: currentTempQuantity,
       unit: tempUnit,
       subtotal: Math.round(scannedProduct.price * actualQuantity * 100) / 100,
     };
@@ -352,7 +354,7 @@ const ScannerSales: React.FC = () => {
     
     toast({
       title: 'Product Added',
-      description: `${scannedProduct.name} (${tempQuantity} ${tempUnit}) added to cart`,
+      description: `${scannedProduct.name} (${currentTempQuantity} ${tempUnit}) added to cart`,
     });
 
     // Close dialog and reset
@@ -1014,7 +1016,16 @@ const ScannerSales: React.FC = () => {
                 <Input
                   type="number"
                   value={tempQuantity}
-                  onChange={(e) => setTempQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setTempQuantity('');
+                    } else {
+                      const num = parseInt(val);
+                      if (!isNaN(num)) setTempQuantity(num);
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
                   min="1"
                   className="w-full"
                   autoFocus
