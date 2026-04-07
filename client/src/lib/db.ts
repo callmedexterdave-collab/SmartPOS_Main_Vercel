@@ -128,23 +128,43 @@ export class AuthService {
     };
 
     await db.users.add(user);
+
+    // CRITICAL: Push admin to server to lock the system
+    try {
+      await api.post('/api/auth/register-admin', user);
+      console.log('Admin account registered on server');
+    } catch (err) {
+      console.error('Failed to register admin on server:', err);
+      // Even if server registration fails, we have it locally,
+      // but the server will remain open for others until this succeeds.
+    }
+
     return user;
   }
 
   static async loginAdmin(username: string, password: string): Promise<User | null> {
-    // Find user by username (which is the mobile number)
-    const user = await db.users.where('username').equals(username).first();
-    if (!user || user.role !== 'admin') {
-      // If not found by username, try finding by mobile number for backward compatibility
-      const userByMobile = await db.users.where('mobile').equals(username).first();
-      if (!userByMobile || userByMobile.role !== 'admin') return null;
-      
-      const isValid = await verifyPassword(password, userByMobile.password);
-      return isValid ? userByMobile : null;
+    // 1. Try local login first
+    const user = await db.users.where('username').equals(username).first() ||
+                await db.users.where('mobile').equals(username).first();
+    
+    if (user && user.role === 'admin') {
+      const isValid = await verifyPassword(password, user.password);
+      if (isValid) return user;
     }
     
-    const isValid = await verifyPassword(password, user.password);
-    return isValid ? user : null;
+    // 2. If local fails, try server login (important for multi-device support)
+    try {
+      const serverUser = await api.post('/api/auth/admin-login', { username, password });
+      if (serverUser) {
+        // Save to local DB for offline access next time
+        await db.users.put(serverUser);
+        return serverUser;
+      }
+    } catch (e) {
+      console.warn('Server login failed or unreachable');
+    }
+
+    return null;
   }
 
   static async loginStaff(staffId: string, passkey: string): Promise<User | null> {

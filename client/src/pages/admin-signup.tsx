@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { motion } from 'framer-motion';
-import { Store, ArrowLeft } from 'lucide-react';
+import { Store, ArrowLeft, Lock } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { AuthService } from '@/lib/db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import api from '@/lib/api';
 
 const signupSchema = z.object({
   businessName: z.string().min(1, 'Business name is required'),
@@ -24,8 +25,23 @@ type SignupFormData = z.infer<typeof signupSchema>;
 const AdminSignup: React.FC = () => {
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   const { login } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const data = await api.get('/api/auth/status');
+        if (data.configured) {
+          setIsLocked(true);
+        }
+      } catch (e) {
+        console.warn('Failed to check system status');
+      }
+    };
+    checkStatus();
+  }, []);
 
   const form = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
@@ -58,6 +74,26 @@ const AdminSignup: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  if (isLocked) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+          <Lock className="w-10 h-10 text-red-500" />
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Registration Locked</h2>
+        <p className="text-gray-600 mb-8 max-w-xs">
+          This SmartPOS+ system is already configured for another business. Please login instead.
+        </p>
+        <Button 
+          onClick={() => setLocation('/admin-login')}
+          className="w-full max-w-xs bg-[#FF8882] hover:bg-[#D89D9D] rounded-xl py-6 font-bold shadow-lg"
+        >
+          Go to Login
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <motion.div

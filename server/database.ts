@@ -120,6 +120,17 @@ export const dbService = {
         createdAt TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        businessName TEXT,
+        ownerName TEXT,
+        mobile TEXT,
+        createdAt TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -266,6 +277,15 @@ export const dbService = {
           if (cloudStaff && cloudStaff.length > 0) {
             dbService.saveStaff(cloudStaff);
             console.log(`Restored ${cloudStaff.length} staff from Cloud.`);
+          }
+
+          // Restore Admins/Users
+          const { data: cloudUsers } = await supabase.from('users').select('*');
+          if (cloudUsers && cloudUsers.length > 0) {
+            for (const user of cloudUsers) {
+              dbService.saveAdmin(user);
+            }
+            console.log(`Restored ${cloudUsers.length} admin accounts from Cloud.`);
           }
         } catch (e) {
           console.warn('Could not restore from Cloud backup (check table existence):', e);
@@ -426,6 +446,33 @@ export const dbService = {
     tx();
     return dbService.getSettings();
   },
+  // Admin/User methods
+  getAdmins: () => {
+    return db.prepare('SELECT * FROM users WHERE role = ?').all('admin');
+  },
+  saveAdmin: (user: any) => {
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO users (id, username, password, role, businessName, ownerName, mobile, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(user.id, user.username, user.password, user.role, user.businessName, user.ownerName, user.mobile, user.createdAt);
+    
+    // Sync to Cloud (Supabase) if available
+    if (useCloud()) {
+      const supabase = getSupabase();
+      if (supabase) {
+        supabase.from('users').upsert(user).then(({ error }) => {
+          if (error) console.error('Cloud admin sync error:', error);
+          else console.log('Cloud admin sync: 1 admin updated.');
+        });
+      }
+    }
+    return user;
+  },
+  getUserByUsername: (username: string) => {
+    return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  },
+
   // Clear all table data (products, staff)
   clearAllData: () => {
     const delProducts = db.prepare('DELETE FROM products').run();

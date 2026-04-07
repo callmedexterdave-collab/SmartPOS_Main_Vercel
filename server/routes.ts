@@ -91,7 +91,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use('/api', allowLocalNetwork);
 
+  // Admin Registration & Status
+  app.get('/api/auth/status', (req: Request, res: Response) => {
+    try {
+      const admins = dbService.getAdmins();
+      res.json({ configured: admins.length > 0 });
+    } catch (e) {
+      res.status(500).json({ error: 'System check failed' });
+    }
+  });
+
+  app.post('/api/auth/register-admin', async (req: Request, res: Response) => {
+    try {
+      const existingAdmins = dbService.getAdmins();
+      if (existingAdmins.length > 0) {
+        return res.status(403).json({ error: 'System already configured. Only one admin allowed in single-tenant mode.' });
+      }
+
+      const user = req.body;
+      dbService.saveAdmin(user);
+      res.status(201).json({ success: true });
+    } catch (error) {
+      console.error('Admin registration failed:', error);
+      res.status(500).json({ error: 'Registration failed' });
+    }
+  });
+
   // Auth API
+  app.post('/api/auth/admin-login', async (req: Request, res: Response) => {
+    try {
+      const { username, password } = req.body;
+      const admin = dbService.getUserByUsername(username);
+      
+      if (!admin || admin.role !== 'admin') {
+        return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      const isValid = await bcrypt.compare(password, admin.password);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      // Return admin info (excluding password)
+      const { password: _, ...adminInfo } = admin;
+      res.json(adminInfo);
+    } catch (error) {
+      console.error('Admin login error:', error);
+      res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
   app.post('/api/auth/login', async (req: Request, res: Response) => {
     try {
       const { staffId, passkey, deviceInfo } = req.body;
